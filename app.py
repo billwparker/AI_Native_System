@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from dotenv import load_dotenv
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -12,6 +13,11 @@ from fastapi import FastAPI, WebSocket
 from pydantic import BaseModel
 import time
 import uvicorn
+
+load_dotenv()
+
+groq_key = os.getenv("GROQ_KEY")
+openai_key = os.getenv("OPENAI_API_KEY")
 
 
 # --- Data Models ---
@@ -291,6 +297,7 @@ class AgentOrchestrator:
         self.tasks: Dict[UUID, Task] = {}
         self.event_bus = EventBus()
         self.pending_tasks: Dict[UUID, Task] = {}  # Tasks waiting for dependencies
+        self.integration_manager = IntegrationManager()  # Add this line
 
     async def register_agent(self, agent: BaseAgent):
         self.agents[agent.id] = agent
@@ -428,6 +435,7 @@ class APIGateway:
         self.orchestrator = AgentOrchestrator()
         self.llm_coordinator = LLMCoordinator(self.orchestrator)
         self._setup_routes()
+        self._setup_events()  # Add this line
 
     def _setup_routes(self):
         @self.app.post("/tasks")
@@ -463,6 +471,25 @@ class APIGateway:
             if not request.intent or len(request.intent.strip()) == 0:
                 return {"error": "Intent cannot be empty"}
             return await self.llm_coordinator.process_intent(request.intent)
+
+    def _setup_events(self):
+        @self.app.on_event("startup")
+        async def startup():
+            # Register integrations
+            await self._register_integrations()
+            logging.basicConfig(level=logging.INFO)
+            logging.info("System initialized with all integrations")
+
+    async def _register_integrations(self):
+        # Example of registering integrations
+        integrations = [
+            Integration(name="Excel", capabilities=["excel.read", "excel.write", "excel.analyze"]),
+            Integration(name="Email", capabilities=["email.send", "email.read", "email.attach"]),
+            Integration(name="Slack", capabilities=["slack.post", "slack.read", "slack.reply"]),
+            Integration(name="Reminder", capabilities=["reminder.set", "reminder.get"])
+        ]
+        for integration in integrations:
+            self.orchestrator.integration_manager.register_integration(integration)
 
 # --- Application Integration Example ---
 class ExcelIntegration:
@@ -520,67 +547,105 @@ class EmailIntegration:
 class LLMCoordinator:
     def __init__(self, orchestrator: AgentOrchestrator):
         self.orchestrator = orchestrator
-        self.available_integrations = {
-            "excel": ["excel.read", "excel.write", "excel.analyze"],
-            "slack": ["slack.post", "slack.read", "slack.reply"],
-            "email": ["email.send", "email.read", "email.attach"]
-        }
 
     async def analyze_intent(self, user_intent: str) -> List[Task]:
+        """
+        Use the LLM to analyze the user's intent and generate tasks with dependencies.
+        """
+        # Call LLM (simulated) to generate a plan based on the user intent
+        plan = await self._call_llm_to_generate_plan(user_intent)
+
         tasks = []
-        user_intent = user_intent.lower()
-        excel_task_id = None
-        
-        # Create Excel analysis task if needed
-        if "excel" in user_intent:
-            excel_task = Task(
+        task_name_to_id = {}
+
+        # Create Task objects based on the plan
+        for task_info in plan['tasks']:
+            task = Task(
                 id=uuid4(),
-                intent="Process Excel data",
+                intent=task_info['intent'],
                 constraints=ResourceConstraints(),
                 status=TaskStatus.PENDING,
                 created_at=time.time(),
                 updated_at=time.time(),
-                required_capabilities=["excel.analyze"]
+                required_capabilities=task_info['capabilities'],
+                dependencies=[]  # Dependencies will be set after all tasks are created
             )
-            tasks.append(excel_task)
-            excel_task_id = excel_task.id  # Store the ID separately
-            logging.info(f"Created Excel task with ID: {excel_task_id}")
+            tasks.append(task)
+            task_name_to_id[task_info['name']] = task.id
 
-            # Create dependent tasks only if we have an Excel task ID
-            if "email" in user_intent:
-                email_task = Task(
-                    id=uuid4(),
-                    intent="Send email with analysis results",
-                    constraints=ResourceConstraints(),
-                    status=TaskStatus.PENDING,
-                    created_at=time.time(),
-                    updated_at=time.time(),
-                    required_capabilities=["email.send"],
-                    dependencies=[excel_task_id]
-                )
-                tasks.append(email_task)
-                logging.info(f"Created Email task depending on Excel task: {excel_task_id}")
-
-            if "slack" in user_intent:
-                slack_task = Task(
-                    id=uuid4(),
-                    intent="Post analysis results to Slack",
-                    constraints=ResourceConstraints(),
-                    status=TaskStatus.PENDING,
-                    created_at=time.time(),
-                    updated_at=time.time(),
-                    required_capabilities=["slack.post"],
-                    dependencies=[excel_task_id]
-                )
-                tasks.append(slack_task)
-                logging.info(f"Created Slack task depending on Excel task: {excel_task_id}")
-
-            # Validate dependencies
-            for task in tasks:
-                if task.dependencies:
-                    logging.info(f"Task {task.id} depends on: {task.dependencies}")
+        # Set dependencies using task IDs
+        for task, task_info in zip(tasks, plan['tasks']):
+            if 'dependencies' in task_info:
+                task.dependencies = [task_name_to_id[dep_name] for dep_name in task_info['dependencies']]
 
         return tasks
+
+    async def _call_llm_to_generate_plan(self, user_intent: str) -> Dict[str, Any]:
+        """
+        Simulate an LLM call to generate a plan of tasks with their capabilities and dependencies.
+        In reality, this would:
+        1. Get available capabilities from integration manager
+        2. Ask LLM to analyze intent and match with available capabilities
+        3. LLM would determine optimal task sequence and dependencies
+        """
+        # Get all available capabilities from registered integrations
+        available_integrations = self.orchestrator.integration_manager.get_all_capabilities()
+        logging.info(f"Available integrations and capabilities: {available_integrations}")
+
+        # Here we would send to LLM:
+        # 1. The user's intent
+        # 2. Available integrations and their capabilities
+        # 3. Ask it to create a plan using only available capabilities
+        
+        # Example prompt template:
+        prompt = f"""
+        User Intent: {user_intent}
+        Available Integrations: {json.dumps(available_integrations, indent=2)}
+        
+        Create a plan using only the available capabilities.
+        Each task must use capabilities that exist in the system.
+        Determine which tasks depend on other tasks.
+        """
+        
+        # For now, we'll simulate the LLM's response
+        plan = {"tasks": []}
+        intent_lower = user_intent.lower()
+
+        # Check if requested operations match available capabilities
+        if "excel" in intent_lower and "analyze" in intent_lower:
+            if "excel.analyze" in available_integrations.get("excel", []):
+                plan['tasks'].append({
+                    "name": "excel_analysis",
+                    "intent": "Process Excel data",
+                    "capabilities": ["excel.analyze"]
+                })
+
+        # Only add email task if capability exists
+        if "email" in intent_lower and "email.send" in available_integrations.get("email", []):
+            dependencies = ["excel_analysis"] if any(task['name'] == "excel_analysis" for task in plan['tasks']) else []
+            plan['tasks'].append({
+                "name": "send_email",
+                "intent": "Send an email with the results",
+                "capabilities": ["email.send"],
+                "dependencies": dependencies
+            })
+
+        # Only add slack task if capability exists
+        if "slack" in intent_lower and "slack.post" in available_integrations.get("slack", []):
+            dependencies = ["excel_analysis"] if any(task['name'] == "excel_analysis" for task in plan['tasks']) else []
+            plan['tasks'].append({
+                "name": "post_slack",
+                "intent": "Post the results to Slack",
+                "capabilities": ["slack.post"],
+                "dependencies": dependencies
+            })
+
+        if len(plan['tasks']) == 0:
+            logging.warning(f"No matching capabilities found for intent: {user_intent}")
+            raise ValueError("No available integrations can handle this request")
+
+        logging.info(f"Generated plan: {json.dumps(plan, indent=2)}")
+        return plan
 
     async def process_intent(self, user_intent: str) -> dict:
         """
@@ -616,6 +681,26 @@ class AISystem:
         # Start API gateway
         uvicorn.run(self.gateway.app, host="0.0.0.0", port=8000)
 
+# Add Integration and IntegrationManager classes
+class Integration:
+    def __init__(self, name: str, capabilities: List[str]):
+        self.name = name
+        self.capabilities = capabilities
+
+class IntegrationManager:
+    def __init__(self):
+        self.integrations: Dict[str, Integration] = {}
+
+    def register_integration(self, integration: Integration):
+        self.integrations[integration.name.lower()] = integration
+
+    def get_integration(self, name: str) -> Optional[Integration]:
+        return self.integrations.get(name.lower())
+
+    def get_all_capabilities(self) -> Dict[str, List[str]]:
+        return {name: integration.capabilities for name, integration in self.integrations.items()}
+    
+    
 # Initialize the FastAPI app
 api_gateway = APIGateway()
 app = api_gateway.app
@@ -634,11 +719,11 @@ async def startup_event():
     
     logging.basicConfig(level=logging.INFO)
     logging.info("System initialized with all integrations")
-
+    
 # Add a test endpoint
 @app.get("/test")
 async def test_system():
     return await api_gateway.llm_coordinator.process_intent(
-        # "Please analyze excel data and email the results"        
-        "Please analyze excel data, email the results and post to slack"
+        # "Please analyze excel data, email the results and post to slack"
+        "Please analyze excel data and send via carrier pigeon"  # Should fail - no pigeon capability
     )
