@@ -9,10 +9,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID, uuid4
-import aiohttp
-import websockets
+# import aiohttp
+# import websockets
 from fastapi import FastAPI, WebSocket
 from pydantic import BaseModel
+import time
+import uvicorn
+
 
 # --- Data Models ---
 
@@ -27,8 +30,7 @@ class ResourceType(Enum):
     MEMORY = "memory"
     DISK = "disk"
 
-@dataclass
-class ResourceConstraints:
+class ResourceConstraints(BaseModel):
     cpu_percent: float = 0.75
     memory_mb: int = 2048
     disk_mb: int = 1024
@@ -45,6 +47,10 @@ class AgentStatus(Enum):
     IDLE = "idle"
     BUSY = "busy"
     ERROR = "error"
+
+class CreateTaskRequest(BaseModel):
+    intent: str
+    constraints: ResourceConstraints
 
 # --- Base Agent Interface ---
 
@@ -210,8 +216,8 @@ class APIGateway:
 
     def _setup_routes(self):
         @self.app.post("/tasks")
-        async def create_task(intent: str, constraints: ResourceConstraints):
-            task = await self.orchestrator.submit_task(intent, constraints)
+        async def create_task(request: CreateTaskRequest):
+            task = await self.orchestrator.submit_task(request.intent, request.constraints)
             return {"task_id": str(task.id)}
 
         @self.app.get("/tasks/{task_id}")
@@ -252,6 +258,8 @@ class ExcelIntegration:
 
     async def handle_excel_operation(self, operation: str, data: dict) -> dict:
         # Implement Excel operations
+        print('Excel operation:', operation)    
+        
         return {"status": "success", "result": f"Executed {operation}"}
 
 # --- System Bootstrap ---
@@ -272,8 +280,11 @@ class AISystem:
         self._integrations.append(excel_integration)
 
         # Start API gateway
-        import uvicorn
         uvicorn.run(self.gateway.app, host="0.0.0.0", port=8000)
+
+# Initialize the FastAPI app
+api_gateway = APIGateway()
+app = api_gateway.app
 
 # --- Usage Example ---
 
