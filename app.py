@@ -435,11 +435,36 @@ class ResourceManager:
 # --- API Gateway ---
 class APIGateway:
     def __init__(self):
-        self.app = FastAPI()
+        self.app = FastAPI(
+            title="AI Native System",
+            description="An AI-native system for intelligent task orchestration",
+            version="0.1.0"
+        )
         self.orchestrator = AgentOrchestrator()
         self.llm_coordinator = LLMCoordinator(self.orchestrator)
         self._setup_routes()
-        self._setup_events() 
+        self._setup_events()  # Add this back
+
+    async def _register_integrations(self):
+        # Register default integrations
+        integrations = [
+            ExcelIntegration(),
+            EmailIntegration(),
+            SlackIntegration(),
+            ReminderIntegration()
+        ]
+        for integration in integrations:
+            self.orchestrator.integration_manager.register_integration(integration)
+            await integration.register_with_system(self)
+
+    def _setup_events(self):
+        @self.app.on_event("startup")
+        async def startup():
+            await self._register_integrations()
+            logging.basicConfig(level=logging.INFO)
+            logging.info("System initialized with all integrations")
+
+    # ...existing code...
 
     def _setup_routes(self):
         @self.app.post("/tasks")
@@ -487,17 +512,6 @@ class APIGateway:
             await self._register_integrations()
             logging.basicConfig(level=logging.INFO)
             logging.info("System initialized with all integrations")
-
-    async def _register_integrations(self):
-        # Example of registering integrations
-        integrations = [
-            ExcelIntegration(),
-            EmailIntegration(),
-            SlackIntegration(),
-            ReminderIntegration()  # Ensure this class is defined with necessary methods
-        ]
-        for integration in integrations:
-            self.orchestrator.integration_manager.register_integration(integration)
 
 # --- Application Integration Example ---
 class Integration(ABC):
@@ -683,6 +697,8 @@ class LLMCoordinator:
         Determine which tasks depend on other tasks.
         """
         
+        logging.info(prompt)
+        
         # For now, we'll simulate the LLM's response
         plan = {"tasks": []}
         intent_lower = user_intent.lower()
@@ -763,24 +779,12 @@ class AISystem:
     def __init__(self):
         self.gateway = APIGateway()
         self.resource_manager = ResourceManager()
-        self._integrations = []
 
     async def initialize(self):
         """Initialize all system components"""
-        # Register integrations
-        integrations = [
-            ExcelIntegration(),
-            SlackIntegration(),
-            EmailIntegration(),
-            ReminderIntegration()
-        ]
-        
-        for integration in integrations:
-            await integration.register_with_system(self.gateway)
-            self._integrations.append(integration)
-        
+        self.gateway._setup_events()  # Remove await since this is not an async function
         logging.basicConfig(level=logging.INFO)
-        logging.info("System initialized with all integrations")
+        logging.info("System initialized")
 
     def start(self):
         """Start the system"""
