@@ -94,13 +94,12 @@ class BaseAgent(ABC):
     async def validate_preconditions(self, task: Task) -> bool:
         pass
 
-# --- Agent Implementation ---
 class TaskExecutorAgent(BaseAgent):
     def __init__(self, agent_id: str, capabilities: List[str]):
         super().__init__(agent_id, capabilities)
         self.current_tasks: Dict[UUID, Task] = {}
         self.orchestrator = None  # Will be set when registered with system
-
+        
     async def validate_preconditions(self, task: Task) -> bool:
         # Check if agent has all required capabilities
         if not all(cap in self.capabilities for cap in task.required_capabilities):
@@ -111,7 +110,7 @@ class TaskExecutorAgent(BaseAgent):
             return False
             
         return True
-
+        
     async def execute(self, task: Task) -> dict:
         if len(self.current_tasks) >= self._max_concurrent_tasks:
             raise RuntimeError("Agent at maximum capacity")
@@ -127,7 +126,7 @@ class TaskExecutorAgent(BaseAgent):
                 if dep_task and dep_task.result:
                     dependency_results[str(dep_id)] = dep_task.result
 
-            # Execute task based on capability
+            # Execute task through integration manager
             integration_manager = self.orchestrator.integration_manager
             if "excel.analyze" in task.required_capabilities:
                 result = await integration_manager.handle_integration_operation("excel", "analyze", task.data)
@@ -135,6 +134,11 @@ class TaskExecutorAgent(BaseAgent):
                 result = await integration_manager.handle_integration_operation("email", "send", dependency_results)
             elif "slack.post" in task.required_capabilities:
                 result = await integration_manager.handle_integration_operation("slack", "post", dependency_results)
+            elif "reminder.set" in task.required_capabilities:
+                result = await integration_manager.handle_integration_operation("reminder", "set", dependency_results)
+            elif any(cap.startswith("postgres.") for cap in task.required_capabilities):
+                operation = next(cap.split(".")[1] for cap in task.required_capabilities if cap.startswith("postgres."))
+                result = await integration_manager.handle_integration_operation("postgres", operation, task.data)
             else:
                 raise ValueError("No matching capabilities found")
 
@@ -146,154 +150,6 @@ class TaskExecutorAgent(BaseAgent):
         finally:
             del self.current_tasks[task.id]
 
-    async def _simulate_excel_analysis(self, dependency_results: Dict[str, TaskResult] = None) -> TaskResult:
-        """
-        Simulate Excel analysis with LLM-like functionality.
-        In reality, this would:
-        1. Use actual Excel files
-        2. Call LLM to understand what analysis to perform
-        3. Execute the analysis
-        4. Have LLM summarize the results
-        """
-        # Simulate LLM analyzing Excel data
-        simulated_analysis = await self._simulate_llm_excel_analysis()
-        
-        return TaskResult(
-            content=simulated_analysis,
-            format="json",
-            metadata={"type": "excel_analysis"}
-        )
-
-    async def _simulate_llm_excel_analysis(self) -> dict:
-        """
-        Simulate LLM analyzing Excel data and generating insights.
-        In reality, this would call an LLM API with a prompt like:
-        "Analyze this Excel data and provide key insights: {excel_data}"
-        """
-        # Simulate finding patterns and insights in the data
-        analysis_result = {
-            "summary": "Q4 sales exceeded expectations with significant growth",
-            "details": {
-                "total_sales": 1234567,
-                "growth_rate": 25.0,
-                "top_product": "Widget X",
-                "key_insights": [
-                    "Sales grew 25% year-over-year",
-                    "Widget X dominated with 45% market share",
-                    "New customer acquisition up 30%"
-                ],
-                "recommendations": [
-                    "Increase Widget X production",
-                    "Expand marketing in high-growth regions"
-                ]
-            }
-        }
-        return analysis_result
-
-    async def _execute_email_task(self, dependency_results: Dict[str, TaskResult]) -> TaskResult:
-        # Get raw results from dependencies
-        raw_results = [result.content for result in dependency_results.values()]
-        
-        # Simulate LLM call to analyze and format results for email
-        # In reality, this would be an actual LLM API call
-        formatted_content = await self._simulate_llm_email_formatting(raw_results)
-        
-        return TaskResult(
-            content=formatted_content,
-            format="json",
-            metadata={"type": "email_content"}
-        )
-
-    async def _execute_slack_task(self, dependency_results: Dict[str, TaskResult]) -> TaskResult:
-        # Get raw results from dependencies
-        raw_results = [result.content for result in dependency_results.values()]
-        
-        # Simulate LLM call to analyze and format results for Slack
-        # In reality, this would be an actual LLM API call
-        formatted_content = await self._simulate_llm_slack_formatting(raw_results)
-        
-        return TaskResult(
-            content=formatted_content,
-            format="json",
-            metadata={"type": "slack_message"}
-        )
-
-    async def _simulate_llm_email_formatting(self, raw_results: List[dict]) -> dict:
-        """
-        Simulate LLM analyzing raw results and formatting them for email.
-        In reality, this would call an LLM API with a prompt like:
-        "Format the following analysis results into a professional email: {raw_results}"
-        """
-        # This is just a simulation of what the LLM would do
-        combined_data = raw_results[0]  # In reality, LLM would analyze all results
-        
-        email_content = {
-            "subject": "Analysis Results",
-            "body": (
-                "Dear team,\n\n"
-                "Based on the analysis results, here are the key findings:\n\n"
-                f"{combined_data.get('summary', 'No summary available')}\n\n"
-                "Key Details:\n"
-            )
-        }
-        
-        # Simulate LLM extracting and formatting relevant details
-        if 'details' in combined_data:
-            for key, value in combined_data['details'].items():
-                email_content['body'] += f"- {key.replace('_', ' ').title()}: {value}\n"
-        
-        email_content['body'] += "\nBest regards,\nAI Assistant"
-        
-        return email_content
-
-    async def _simulate_llm_slack_formatting(self, raw_results: List[dict]) -> dict:
-        """
-        Simulate LLM analyzing raw results and formatting them for Slack.
-        In reality, this would call an LLM API with a prompt like:
-        "Format the following analysis results into a concise Slack message with appropriate formatting: {raw_results}"
-        """
-        # This is just a simulation of what the LLM would do
-        combined_data = raw_results[0]  # In reality, LLM would analyze all results
-        
-        # Simulate LLM generating Slack blocks with appropriate formatting
-        slack_message = {
-            "channel": "#updates",
-            "blocks": [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "📊 Analysis Results"
-                    }
-                }
-            ]
-        }
-        
-        # Simulate LLM deciding what's important and how to format it
-        if 'summary' in combined_data:
-            slack_message['blocks'].append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Key Finding:*\n{combined_data['summary']}"
-                }
-            })
-        
-        # Simulate LLM organizing details into a clean format
-        if 'details' in combined_data:
-            details_text = "*Details:*\n"
-            for key, value in combined_data['details'].items():
-                details_text += f"• {key.replace('_', ' ').title()}: {value}\n"
-            
-            slack_message['blocks'].append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": details_text
-                }
-            })
-        
-        return slack_message
 
 # --- Orchestrator ---
 class AgentOrchestrator:
@@ -444,7 +300,7 @@ class APIGateway:
         self.orchestrator = AgentOrchestrator()
         self.llm_coordinator = LLMCoordinator(self.orchestrator)
         self._setup_routes()
-        self._setup_events()  # Add this back
+        self._setup_events()  
 
     async def _register_integrations(self):
         # Register default integrations
@@ -452,7 +308,8 @@ class APIGateway:
             ExcelIntegration(),
             EmailIntegration(),
             SlackIntegration(),
-            ReminderIntegration()
+            ReminderIntegration(),
+            PostgresIntegration()  
         ]
         for integration in integrations:
             self.orchestrator.integration_manager.register_integration(integration)
@@ -512,7 +369,7 @@ class APIGateway:
             logging.basicConfig(level=logging.INFO)
             logging.info("System initialized with all integrations")
 
-# --- Application Integration Example ---
+# --- Application Integration Examples ---
 class Integration(ABC):
     def __init__(self, name: str, capabilities: List[str]):
         self.name = name
@@ -538,33 +395,61 @@ class ExcelIntegration(Integration):
         agent.orchestrator = gateway.orchestrator
         await gateway.orchestrator.register_agent(agent)
 
+    async def _simulate_llm_excel_analysis(self) -> dict:
+        """
+        Simulate LLM analyzing Excel data and generating insights.
+        """
+        analysis_result = {
+            "summary": "Q4 sales exceeded expectations with significant growth",
+            "details": {
+                "total_sales": 1234567,
+                "growth_rate": 25.0,
+                "top_product": "Widget X",
+                "key_insights": [
+                    "Sales grew 25% year-over-year",
+                    "Widget X dominated with 45% market share",
+                    "New customer acquisition up 30%"
+                ],
+                "recommendations": [
+                    "Increase Widget X production",
+                    "Expand marketing in high-growth regions"
+                ]
+            }
+        }
+        return analysis_result
+        
+
     async def handle_operation(self, operation: str, data: dict) -> dict:
         """
         Handle specific Excel operations.
         :param operation: The type of operation to perform (e.g., "read", "write", "analyze").
         :param data: The data required for the operation.
-        :return: A dictionary with the status and result of the operation.
+        :return: A dictionary with the operation results.
         """
-        if operation == "read":
-            # Implement Excel read operation
-            print('Reading Excel data:', data)
-            # Simulate reading data
-            result = {"status": "success", "data": "Excel data read successfully"}
+        if operation == "analyze":
+            # Use the rich simulation logic
+            analysis_result = await self._simulate_llm_excel_analysis()
+            return TaskResult(
+                content=analysis_result,
+                format="json",
+                metadata={"type": "excel_analysis"},
+                data=data
+            )
+        elif operation == "read":
+            return TaskResult(
+                content={"status": "success", "data": "Excel data read successfully"},
+                format="json",
+                metadata={"type": "excel_read"}
+            )
         elif operation == "write":
-            # Implement Excel write operation
-            print('Writing to Excel:', data)
-            # Simulate writing data
-            result = {"status": "success", "data": "Excel data written successfully"}
-        elif operation == "analyze":
-            # Implement Excel analyze operation
-            print('Analyzing Excel data:', data)
-            # Simulate analyzing data
-            result = {"status": "success", "data": "Excel data analyzed successfully"}
+            return TaskResult(
+                content={"status": "success", "data": "Excel data written successfully"},
+                format="json",
+                metadata={"type": "excel_write"}
+            )
         else:
-            result = {"status": "error", "message": f"Unknown operation: {operation}"}
+            raise ValueError(f"Unknown operation: {operation}")
         
-        return result
-
 class SlackIntegration(Integration):
     def __init__(self):
         super().__init__("Slack", ["slack.post", "slack.read", "slack.reply"])
@@ -576,12 +461,69 @@ class SlackIntegration(Integration):
         )
         agent.orchestrator = gateway.orchestrator
         await gateway.orchestrator.register_agent(agent)
-
+        
+    async def _simulate_llm_slack_formatting(self, raw_results: List[dict]) -> dict:
+        """
+        Simulate LLM analyzing raw results and formatting them for Slack.
+        In reality, this would call an LLM API with a prompt like:
+        "Format the following analysis results into a concise Slack message with appropriate formatting: {raw_results}"
+        """
+        # This is just a simulation of what the LLM would do
+        combined_data = raw_results[0]  # In reality, LLM would analyze all results
+        
+        # Simulate LLM generating Slack blocks with appropriate formatting
+        slack_message = {
+            "channel": "#updates",
+            "blocks": [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "📊 Analysis Results"
+                    }
+                }
+            ]
+        }
+        
+        # Simulate LLM deciding what's important and how to format it
+        if 'summary' in combined_data:
+            slack_message['blocks'].append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Key Finding:*\n{combined_data['summary']}"
+                }
+            })
+        
+        # Simulate LLM organizing details into a clean format
+        if 'details' in combined_data:
+            details_text = "*Details:*\n"
+            for key, value in combined_data['details'].items():
+                details_text += f"• {key.replace('_', ' ').title()}: {value}\n"
+            
+            slack_message['blocks'].append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": details_text
+                }
+            })
+        
+        return slack_message
+        
     async def handle_operation(self, operation: str, data: dict) -> dict:
         # Dummy implementation
-        print('Slack operation:', operation)
-        return {"status": "success", "result": f"Executed {operation}"}
-
+        
+        raw_results = [result.content for result in data.values()]
+                
+        operation_result = await self._simulate_llm_slack_formatting(raw_results)
+        return TaskResult(
+                content=operation_result,
+                format="json",
+                metadata={"type": "email_content"},
+                data=data
+            )        
+        
 class EmailIntegration(Integration):
     def __init__(self):
         super().__init__("Email", ["email.send", "email.read", "email.attach"])
@@ -593,15 +535,123 @@ class EmailIntegration(Integration):
         )
         agent.orchestrator = gateway.orchestrator
         await gateway.orchestrator.register_agent(agent)
+                
+    async def _simulate_llm_email_formatting(self, raw_results: List[dict]) -> dict:
+        """
+        Simulate LLM analyzing raw results and formatting them for email.
+        In reality, this would call an LLM API with a prompt like:
+        "Format the following analysis results into a professional email: {raw_results}"
+        """
+        # This is just a simulation of what the LLM would do
+        combined_data = raw_results[0]  # In reality, LLM would analyze all results
+        
+        email_content = {
+            "subject": "Analysis Results",
+            "body": (
+                "Dear team,\n\n"
+                "Based on the analysis results, here are the key findings:\n\n"
+                f"{combined_data.get('summary', 'No summary available')}\n\n"
+                "Key Details:\n"
+            )
+        }
+        
+        # Simulate LLM extracting and formatting relevant details
+        if 'details' in combined_data:
+            for key, value in combined_data['details'].items():
+                email_content['body'] += f"- {key.replace('_', ' ').title()}: {value}\n"
+        
+        email_content['body'] += "\nBest regards,\nAI Assistant"
+        
+        return email_content
+        
 
     async def handle_operation(self, operation: str, data: dict) -> dict:
         # Dummy implementation
-        print('Email operation:', operation)
-        return {"status": "success", "result": f"Executed {operation}"}
+        
+        raw_results = [result.content for result in data.values()]
+                
+        operation_result = await self._simulate_llm_email_formatting(raw_results)
+        return TaskResult(
+                content=operation_result,
+                format="json",
+                metadata={"type": "email_content"},
+                data=data
+            )        
 
 class ReminderIntegration(Integration):
     def __init__(self):
-        super().__init__("Reminder", ["reminder.set", "reminder.get"])
+        super().__init__("Reminder", ["reminder.set", "reminder.get", "reminder.list", "reminder.delete"])
+
+    async def register_with_system(self, gateway: APIGateway):
+        agent = TaskExecutorAgent(
+            agent_id=f"{self.name.lower()}_agent",
+            capabilities=self.capabilities
+        )
+        agent.orchestrator = gateway.orchestrator
+        await gateway.orchestrator.register_agent(agent)
+        
+    async def _simulate_llm_reminder_formatting(self, raw_results: List[dict]) -> dict:
+        """
+        Simulate LLM analyzing raw results and formatting them for email.
+        In reality, this would call an LLM API with a prompt like:
+        "Format the following analysis results into a professional email: {raw_results}"
+        """
+        # This is just a simulation of what the LLM would do
+        combined_data = raw_results[0]  # In reality, LLM would analyze all results
+        
+        reminder_content = {
+            f"{combined_data.get('summary', 'No summary available')}\n\n"
+        }
+        
+        return reminder_content
+
+    async def handle_operation(self, operation: str, data: dict) -> dict:
+        """
+        Handle specific reminder operations.
+        :param operation: The type of operation to perform (e.g., "set", "get").
+        :param data: The data required for the operation.
+        :return: A TaskResult with the operation results.
+        """
+        
+        raw_results = [result.content for result in data.values()]
+        operation_result = await self._simulate_llm_reminder_formatting(raw_results)
+        
+        if operation == "set":
+            reminder_data = {
+                "status": "success",
+                'content': operation_result,
+                "reminder_id": str(uuid4()),
+                "message": "Reminder set successfully",
+                "time": time.time() + 3600  # Set for 1 hour from now
+            }
+            return TaskResult(
+                content=reminder_data,
+                format="json",
+                metadata={"type": "reminder_set"}
+            )
+        elif operation == "get":
+            reminder_data = {
+                "status": "success",
+                "reminders": [
+                    {"id": str(uuid4()), "message": "Sample reminder", "time": time.time() + 3600}
+                ]
+            }
+            return TaskResult(
+                content=reminder_data,
+                format="json",
+                metadata={"type": "reminder_get"}
+            )
+        else:
+            raise ValueError(f"Unknown operation: {operation}")
+
+class PostgresIntegration(Integration):
+    def __init__(self):
+        super().__init__("Postgres", [
+            "postgres.query",
+            "postgres.insert",
+            "postgres.update",
+            "postgres.delete"
+        ])
 
     async def register_with_system(self, gateway: APIGateway):
         agent = TaskExecutorAgent(
@@ -613,21 +663,20 @@ class ReminderIntegration(Integration):
 
     async def handle_operation(self, operation: str, data: dict) -> dict:
         """
-        Handle specific reminder operations.
-        :param operation: The type of operation to perform (e.g., "set", "get").
-        :param data: The data required for the operation.
-        :return: A dictionary with the status and result of the operation.
+        Handle PostgreSQL database operations.
         """
-        if operation == "set":
-            # Implement reminder set operation
-            print('Setting reminder:', data)
-            # Simulate setting a reminder
-            result = {"status": "success", "data": "Reminder set successfully"}
-        elif operation == "get":
-            # Implement reminder get operation
-            print('Getting reminder:', data)
-            # Simulate retrieving a reminder
-            result = {"status": "success", "data": "Reminder details retrieved successfully"}
+        if operation == "query":
+            print('Executing PostgreSQL query:', data)
+            result = {"status": "success", "data": "Query executed successfully"}
+        elif operation == "insert":
+            print('Inserting data:', data)
+            result = {"status": "success", "data": "Data inserted successfully"}
+        elif operation == "update":
+            print('Updating data:', data)
+            result = {"status": "success", "data": "Data updated successfully"}
+        elif operation == "delete":
+            print('Deleting data:', data)
+            result = {"status": "success", "data": "Data deleted successfully"}
         else:
             result = {"status": "error", "message": f"Unknown operation: {operation}"}
         
@@ -741,6 +790,17 @@ class LLMCoordinator:
                 "dependencies": dependencies
             })
 
+        # Add PostgreSQL task if capability exists
+        if any(word in intent_lower for word in ["database", "query", "sql", "postgres"]):
+            operation = "query"  # Default to query, but could be determined by intent analysis
+            if "postgres." + operation in available_integrations.get("postgres", []):
+                plan['tasks'].append({
+                    "name": "database_operation",
+                    "intent": f"Execute PostgreSQL {operation}",
+                    "capabilities": [f"postgres.{operation}"],
+                    "dependencies": []
+                })
+
         if len(plan['tasks']) == 0:
             logging.warning(f"No matching capabilities found for intent: {user_intent}")
             raise ValueError("No available integrations can handle this request")
@@ -791,7 +851,7 @@ class AISystem:
 
     async def initialize(self):
         """Initialize all system components"""
-        self.gateway._setup_events()  # Remove await since this is not an async function
+        self.gateway._setup_events()  
         logging.basicConfig(level=logging.INFO)
         logging.info("System initialized")
 
@@ -812,6 +872,7 @@ async def startup_event():
 async def test_system():
     return await ai_system.gateway.llm_coordinator.process_intent(
         "Please analyze excel data, email the results and post to slack and set a reminder"
+        # "Please read from the database 100 random records from the locations table"
     )
 
 if __name__ == "__main__":
