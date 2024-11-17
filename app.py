@@ -18,6 +18,7 @@ load_dotenv()
 
 groq_key = os.getenv("GROQ_KEY")
 openai_key = os.getenv("OPENAI_API_KEY")
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
 
 
 # --- Data Models ---
@@ -464,8 +465,6 @@ class APIGateway:
             logging.basicConfig(level=logging.INFO)
             logging.info("System initialized with all integrations")
 
-    # ...existing code...
-
     def _setup_routes(self):
         @self.app.post("/tasks")
         async def create_task(request: CreateTaskRequest):
@@ -712,6 +711,16 @@ class LLMCoordinator:
                     "capabilities": ["excel.analyze"]
                 })
 
+        # Add reminder task if capability exists
+        if "reminder" in intent_lower and "reminder.set" in available_integrations.get("reminder", []):
+            dependencies = ["excel_analysis"] if any(task['name'] == "excel_analysis" for task in plan['tasks']) else []
+            plan['tasks'].append({
+                "name": "set_reminder",
+                "intent": "Set a reminder for follow-up",
+                "capabilities": ["reminder.set"],
+                "dependencies": dependencies
+            })
+
         # Only add email task if capability exists
         if "email" in intent_lower and "email.send" in available_integrations.get("email", []):
             dependencies = ["excel_analysis"] if any(task['name'] == "excel_analysis" for task in plan['tasks']) else []
@@ -802,7 +811,7 @@ async def startup_event():
 @app.get("/test")
 async def test_system():
     return await ai_system.gateway.llm_coordinator.process_intent(
-        "Please analyze excel data, email the results and post to slack"
+        "Please analyze excel data, email the results and post to slack and set a reminder"
     )
 
 if __name__ == "__main__":
