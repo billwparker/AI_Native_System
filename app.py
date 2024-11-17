@@ -158,7 +158,7 @@ class AgentOrchestrator:
         self.tasks: Dict[UUID, Task] = {}
         self.event_bus = EventBus()
         self.pending_tasks: Dict[UUID, Task] = {}  # Tasks waiting for dependencies
-        self.integration_manager = IntegrationManager()  # Add this line
+        self.integration_manager = IntegrationManager()  
 
     async def register_agent(self, agent: BaseAgent):
         self.agents[agent.id] = agent
