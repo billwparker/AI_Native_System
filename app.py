@@ -56,6 +56,7 @@ class Task(BaseModel):
     required_capabilities: List[str] = []
     dependencies: List[UUID] = []  # Add dependencies field
     result: Optional[TaskResult] = None  # Replace result_data with structured result
+    data: Optional[Dict[str, Any]] = None  # Add data field
 
     class Config:
         arbitrary_types_allowed = True
@@ -126,12 +127,15 @@ class TaskExecutorAgent(BaseAgent):
                     dependency_results[str(dep_id)] = dep_task.result
 
             # Execute task based on capability
+            integration_manager = self.orchestrator.integration_manager
             if "excel.analyze" in task.required_capabilities:
-                result = await self._simulate_excel_analysis(dependency_results)
+                result = await integration_manager.handle_integration_operation("excel", "analyze", task.data)
             elif "email.send" in task.required_capabilities:
-                result = await self._execute_email_task(dependency_results)
+                result = await integration_manager.handle_integration_operation("email", "send", dependency_results)
             elif "slack.post" in task.required_capabilities:
-                result = await self._execute_slack_task(dependency_results)
+                result = await integration_manager.handle_integration_operation("slack", "post", dependency_results)
+            else:
+                raise ValueError("No matching capabilities found")
 
             self.status = AgentStatus.IDLE
             return result
@@ -435,7 +439,7 @@ class APIGateway:
         self.orchestrator = AgentOrchestrator()
         self.llm_coordinator = LLMCoordinator(self.orchestrator)
         self._setup_routes()
-        self._setup_events()  # Add this line
+        self._setup_events() 
 
     def _setup_routes(self):
         @self.app.post("/tasks")
@@ -450,6 +454,10 @@ class APIGateway:
                 return task
             return {"error": "Task not found"}
 
+        '''
+        Enables building responsive applications that can react to task status changes 
+        in real-time, without polling the server for updates.
+        '''
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
@@ -483,66 +491,134 @@ class APIGateway:
     async def _register_integrations(self):
         # Example of registering integrations
         integrations = [
-            Integration(name="Excel", capabilities=["excel.read", "excel.write", "excel.analyze"]),
-            Integration(name="Email", capabilities=["email.send", "email.read", "email.attach"]),
-            Integration(name="Slack", capabilities=["slack.post", "slack.read", "slack.reply"]),
-            Integration(name="Reminder", capabilities=["reminder.set", "reminder.get"])
+            ExcelIntegration(),
+            EmailIntegration(),
+            SlackIntegration(),
+            ReminderIntegration()  # Ensure this class is defined with necessary methods
         ]
         for integration in integrations:
             self.orchestrator.integration_manager.register_integration(integration)
 
 # --- Application Integration Example ---
-class ExcelIntegration:
+class Integration(ABC):
+    def __init__(self, name: str, capabilities: List[str]):
+        self.name = name
+        self.capabilities = capabilities
+
+    @abstractmethod
+    async def register_with_system(self, gateway: 'APIGateway'):
+        pass
+
+    @abstractmethod
+    async def handle_operation(self, operation: str, data: dict) -> dict:
+        pass
+
+class ExcelIntegration(Integration):
     def __init__(self):
-        self.capabilities = ["excel.read", "excel.write", "excel.analyze"]
+        super().__init__("Excel", ["excel.read", "excel.write", "excel.analyze"])
 
     async def register_with_system(self, gateway: APIGateway):
         agent = TaskExecutorAgent(
-            agent_id="excel_agent",
+            agent_id=f"{self.name.lower()}_agent",
             capabilities=self.capabilities
         )
-        agent.orchestrator = gateway.orchestrator  # Set orchestrator reference
+        agent.orchestrator = gateway.orchestrator
         await gateway.orchestrator.register_agent(agent)
 
-    async def handle_excel_operation(self, operation: str, data: dict) -> dict:
-        # Implement Excel operations
-        print('Excel operation:', operation)    
+    async def handle_operation(self, operation: str, data: dict) -> dict:
+        """
+        Handle specific Excel operations.
+        :param operation: The type of operation to perform (e.g., "read", "write", "analyze").
+        :param data: The data required for the operation.
+        :return: A dictionary with the status and result of the operation.
+        """
+        if operation == "read":
+            # Implement Excel read operation
+            print('Reading Excel data:', data)
+            # Simulate reading data
+            result = {"status": "success", "data": "Excel data read successfully"}
+        elif operation == "write":
+            # Implement Excel write operation
+            print('Writing to Excel:', data)
+            # Simulate writing data
+            result = {"status": "success", "data": "Excel data written successfully"}
+        elif operation == "analyze":
+            # Implement Excel analyze operation
+            print('Analyzing Excel data:', data)
+            # Simulate analyzing data
+            result = {"status": "success", "data": "Excel data analyzed successfully"}
+        else:
+            result = {"status": "error", "message": f"Unknown operation: {operation}"}
         
-        return {"status": "success", "result": f"Executed {operation}"}
+        return result
 
-class SlackIntegration:
+class SlackIntegration(Integration):
     def __init__(self):
-        self.capabilities = ["slack.post", "slack.read", "slack.reply"]
+        super().__init__("Slack", ["slack.post", "slack.read", "slack.reply"])
 
     async def register_with_system(self, gateway: APIGateway):
         agent = TaskExecutorAgent(
-            agent_id="slack_agent",
+            agent_id=f"{self.name.lower()}_agent",
             capabilities=self.capabilities
         )
-        agent.orchestrator = gateway.orchestrator  # Add this line
+        agent.orchestrator = gateway.orchestrator
         await gateway.orchestrator.register_agent(agent)
 
-    async def handle_slack_operation(self, operation: str, data: dict) -> dict:
+    async def handle_operation(self, operation: str, data: dict) -> dict:
         # Dummy implementation
         print('Slack operation:', operation)
         return {"status": "success", "result": f"Executed {operation}"}
 
-class EmailIntegration:
+class EmailIntegration(Integration):
     def __init__(self):
-        self.capabilities = ["email.send", "email.read", "email.attach"]
+        super().__init__("Email", ["email.send", "email.read", "email.attach"])
 
     async def register_with_system(self, gateway: APIGateway):
         agent = TaskExecutorAgent(
-            agent_id="email_agent",
+            agent_id=f"{self.name.lower()}_agent",
             capabilities=self.capabilities
         )
-        agent.orchestrator = gateway.orchestrator  # Add this line
+        agent.orchestrator = gateway.orchestrator
         await gateway.orchestrator.register_agent(agent)
 
-    async def handle_email_operation(self, operation: str, data: dict) -> dict:
+    async def handle_operation(self, operation: str, data: dict) -> dict:
         # Dummy implementation
         print('Email operation:', operation)
         return {"status": "success", "result": f"Executed {operation}"}
+
+class ReminderIntegration(Integration):
+    def __init__(self):
+        super().__init__("Reminder", ["reminder.set", "reminder.get"])
+
+    async def register_with_system(self, gateway: APIGateway):
+        agent = TaskExecutorAgent(
+            agent_id=f"{self.name.lower()}_agent",
+            capabilities=self.capabilities
+        )
+        agent.orchestrator = gateway.orchestrator
+        await gateway.orchestrator.register_agent(agent)
+
+    async def handle_operation(self, operation: str, data: dict) -> dict:
+        """
+        Handle specific reminder operations.
+        :param operation: The type of operation to perform (e.g., "set", "get").
+        :param data: The data required for the operation.
+        :return: A dictionary with the status and result of the operation.
+        """
+        if operation == "set":
+            # Implement reminder set operation
+            print('Setting reminder:', data)
+            # Simulate setting a reminder
+            result = {"status": "success", "data": "Reminder set successfully"}
+        elif operation == "get":
+            # Implement reminder get operation
+            print('Getting reminder:', data)
+            # Simulate retrieving a reminder
+            result = {"status": "success", "data": "Reminder details retrieved successfully"}
+        else:
+            result = {"status": "error", "message": f"Unknown operation: {operation}"}
+        
+        return result
 
 class LLMCoordinator:
     def __init__(self, orchestrator: AgentOrchestrator):
@@ -662,31 +738,6 @@ class LLMCoordinator:
             
         return {"message": "Intent processing started", "task_ids": results}
 
-# --- System Bootstrap ---
-class AISystem:
-    def __init__(self):
-        self.gateway = APIGateway()
-        self.resource_manager = ResourceManager()
-        self._integrations = []
-
-    async def start(self):
-        # Initialize system components
-        logging.info("Starting AI System...")
-        
-        # Register integrations
-        excel_integration = ExcelIntegration()
-        await excel_integration.register_with_system(self.gateway)
-        self._integrations.append(excel_integration)
-
-        # Start API gateway
-        uvicorn.run(self.gateway.app, host="0.0.0.0", port=8000)
-
-# Add Integration and IntegrationManager classes
-class Integration:
-    def __init__(self, name: str, capabilities: List[str]):
-        self.name = name
-        self.capabilities = capabilities
-
 class IntegrationManager:
     def __init__(self):
         self.integrations: Dict[str, Integration] = {}
@@ -700,30 +751,55 @@ class IntegrationManager:
     def get_all_capabilities(self) -> Dict[str, List[str]]:
         return {name: integration.capabilities for name, integration in self.integrations.items()}
     
-    
-# Initialize the FastAPI app
-api_gateway = APIGateway()
-app = api_gateway.app
+    async def handle_integration_operation(self, name: str, operation: str, data: dict) -> dict:
+        integration = self.get_integration(name)
+        if integration:
+            return await integration.handle_operation(operation, data)
+        else:
+            raise ValueError(f"Integration {name} not found")
 
-# Register an Excel agent for testing
+# --- System Bootstrap ---
+class AISystem:
+    def __init__(self):
+        self.gateway = APIGateway()
+        self.resource_manager = ResourceManager()
+        self._integrations = []
+
+    async def initialize(self):
+        """Initialize all system components"""
+        # Register integrations
+        integrations = [
+            ExcelIntegration(),
+            SlackIntegration(),
+            EmailIntegration(),
+            ReminderIntegration()
+        ]
+        
+        for integration in integrations:
+            await integration.register_with_system(self.gateway)
+            self._integrations.append(integration)
+        
+        logging.basicConfig(level=logging.INFO)
+        logging.info("System initialized with all integrations")
+
+    def start(self):
+        """Start the system"""
+        logging.info("Starting AI System...")
+        uvicorn.run(self.gateway.app, host="0.0.0.0", port=8000)
+
+# Create single system instance
+ai_system = AISystem()
+app = ai_system.gateway.app
+
 @app.on_event("startup")
 async def startup_event():
-    # Register all integrations
-    excel_integration = ExcelIntegration()
-    slack_integration = SlackIntegration()
-    email_integration = EmailIntegration()
-    
-    await excel_integration.register_with_system(api_gateway)
-    await slack_integration.register_with_system(api_gateway)
-    await email_integration.register_with_system(api_gateway)
-    
-    logging.basicConfig(level=logging.INFO)
-    logging.info("System initialized with all integrations")
-    
-# Add a test endpoint
+    await ai_system.initialize()
+
 @app.get("/test")
 async def test_system():
-    return await api_gateway.llm_coordinator.process_intent(
-        # "Please analyze excel data, email the results and post to slack"
-        "Please analyze excel data and send via carrier pigeon"  # Should fail - no pigeon capability
+    return await ai_system.gateway.llm_coordinator.process_intent(
+        "Please analyze excel data, email the results and post to slack"
     )
+
+if __name__ == "__main__":
+    ai_system.start()
